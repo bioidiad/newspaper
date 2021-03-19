@@ -64,8 +64,8 @@ class Configuration(object):
         self.stopwords_class = StopWords
 
         self.browser_user_agent = 'newspaper/%s' % __version__
-        self.headers = {}
-        self.request_timeout = 7
+        self.headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
+        self.request_timeout = 60
         self.proxies = {}
         self.number_threads = 10
 
