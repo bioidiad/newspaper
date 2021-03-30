@@ -14,14 +14,10 @@ __copyright__ = 'Copyright 2014, Lucas Ou-Yang'
 import copy
 import logging
 import re
-import re
 from collections import defaultdict
 
-from dateutil.parser import parse as date_parser
-from tldextract import tldextract
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse
 
-from . import urls
 from .utils import StringReplacement, StringSplitter
 
 log = logging.getLogger(__name__)
@@ -158,81 +154,6 @@ class ContentExtractor(object):
                 authors.extend(parse_byline(content))
 
         return uniqify_list(authors)
-
-        # TODO Method 2: Search raw html for a by-line
-        # match = re.search('By[\: ].*\\n|From[\: ].*\\n', html)
-        # try:
-        #    # Don't let zone be too long
-        #    line = match.group(0)[:100]
-        #    authors = parse_byline(line)
-        # except:
-        #    return [] # Failed to find anything
-        # return authors
-
-    def get_publishing_date(self, url, doc):
-        """3 strategies for publishing date extraction. The strategies
-        are descending in accuracy and the next strategy is only
-        attempted if a preferred one fails.
-
-        1. Pubdate from URL
-        2. Pubdate from metadata
-        3. Raw regex searches in the HTML + added heuristics
-        """
-
-        def parse_date_str(date_str):
-            if date_str:
-                try:
-                    return date_parser(date_str)
-                except (ValueError, OverflowError, AttributeError, TypeError):
-                    # near all parse failures are due to URL dates without a day
-                    # specifier, e.g. /2014/04/
-                    return None
-
-        date_match = re.search(urls.STRICT_DATE_REGEX, url)
-        if date_match:
-            date_str = date_match.group(0)
-            datetime_obj = parse_date_str(date_str)
-            if datetime_obj:
-                return datetime_obj
-
-        PUBLISH_DATE_TAGS = [
-            {'attribute': 'property', 'value': 'rnews:datePublished',
-             'content': 'content'},
-            {'attribute': 'property', 'value': 'article:published_time',
-             'content': 'content'},
-            {'attribute': 'name', 'value': 'OriginalPublicationDate',
-             'content': 'content'},
-            {'attribute': 'itemprop', 'value': 'datePublished',
-             'content': 'datetime'},
-            {'attribute': 'property', 'value': 'og:published_time',
-             'content': 'content'},
-            {'attribute': 'name', 'value': 'article_date_original',
-             'content': 'content'},
-            {'attribute': 'name', 'value': 'publication_date',
-             'content': 'content'},
-            {'attribute': 'name', 'value': 'sailthru.date',
-             'content': 'content'},
-            {'attribute': 'name', 'value': 'PublishDate',
-             'content': 'content'},
-            {'attribute': 'pubdate', 'value': 'pubdate',
-             'content': 'datetime'},
-            {'attribute': 'name', 'value': 'publish_date',
-             'content': 'content'},
-        ]
-        for known_meta_tag in PUBLISH_DATE_TAGS:
-            meta_tags = self.parser.getElementsByTag(
-                doc,
-                attr=known_meta_tag['attribute'],
-                value=known_meta_tag['value'])
-            if meta_tags:
-                date_str = self.parser.getAttribute(
-                    meta_tags[0],
-                    known_meta_tag['content'])
-                datetime_obj = parse_date_str(date_str)
-                if datetime_obj:
-                    return datetime_obj
-
-        return None
 
     def get_title(self, doc):
         """Fetch the article title and analyze it
@@ -374,36 +295,6 @@ class ContentExtractor(object):
         title = title_pieces[large_text_index]
         return TITLE_REPLACEMENTS.replaceAll(title).strip()
 
-    def get_feed_urls(self, source_url, categories):
-        """Takes a source url and a list of category objects and returns
-        a list of feed urls
-        """
-        total_feed_urls = []
-        for category in categories:
-            kwargs = {'attr': 'type', 'value': 'application\/rss\+xml'}
-            feed_elements = self.parser.getElementsByTag(
-                category.doc, **kwargs)
-            feed_urls = [e.get('href') for e in feed_elements if e.get('href')]
-            total_feed_urls.extend(feed_urls)
-
-        total_feed_urls = total_feed_urls[:50]
-        total_feed_urls = [urls.prepare_url(f, source_url)
-                           for f in total_feed_urls]
-        total_feed_urls = list(set(total_feed_urls))
-        return total_feed_urls
-
-    def get_favicon(self, doc):
-        """Extract the favicon from a website http://en.wikipedia.org/wiki/Favicon
-        <link rel="shortcut icon" type="image/png" href="favicon.png" />
-        <link rel="icon" type="image/png" href="favicon.png" />
-        """
-        kwargs = {'tag': 'link', 'attr': 'rel', 'value': 'icon'}
-        meta = self.parser.getElementsByTag(doc, **kwargs)
-        if meta:
-            favicon = self.parser.getAttribute(meta[0], 'href')
-            return favicon
-        return ''
-
     def get_meta_lang(self, doc):
         """Extract content language from meta
         """
@@ -442,31 +333,6 @@ class ContentExtractor(object):
             content = self.parser.getAttribute(meta[0], 'content')
         if content:
             return content.strip()
-        return ''
-
-    def get_meta_img_url(self, article_url, doc):
-        """Returns the 'top img' as specified by the website
-        """
-        top_meta_image, try_one, try_two, try_three, try_four = [None] * 5
-        try_one = self.get_meta_content(doc, 'meta[property="og:image"]')
-        if not try_one:
-            link_img_src_kwargs = \
-                {'tag': 'link', 'attr': 'rel', 'value': 'img_src|image_src'}
-            elems = self.parser.getElementsByTag(doc, use_regex=True, **link_img_src_kwargs)
-            try_two = elems[0].get('href') if elems else None
-
-            if not try_two:
-                try_three = self.get_meta_content(doc, 'meta[name="og:image"]')
-
-                if not try_three:
-                    link_icon_kwargs = {'tag': 'link', 'attr': 'rel', 'value': 'icon'}
-                    elems = self.parser.getElementsByTag(doc, **link_icon_kwargs)
-                    try_four = elems[0].get('href') if elems else None
-
-        top_meta_image = try_one or try_two or try_three or try_four
-
-        if top_meta_image:
-            return urljoin(article_url, top_meta_image)
         return ''
 
     def get_meta_type(self, doc):
@@ -566,27 +432,6 @@ class ContentExtractor(object):
 
         return meta_url
 
-    def get_img_urls(self, article_url, doc):
-        """Return all of the images on an html page, lxml root
-        """
-        img_kwargs = {'tag': 'img'}
-        img_tags = self.parser.getElementsByTag(doc, **img_kwargs)
-        urls = [img_tag.get('src')
-                for img_tag in img_tags if img_tag.get('src')]
-        img_links = set([urljoin(article_url, url)
-                         for url in urls])
-        return img_links
-
-    def get_first_img_url(self, article_url, top_node):
-        """Retrieves the first image in the 'top_node'
-        The top node is essentially the HTML markdown where the main
-        article lies and the first image in that area is probably signifigcant.
-        """
-        node_images = self.get_img_urls(article_url, top_node)
-        node_images = list(node_images)
-        if node_images:
-            return urljoin(article_url, node_images[0])
-        return ''
 
     def _get_urls(self, doc, titles):
         """Return a list of urls or a list of (url, title_text) tuples
@@ -625,132 +470,6 @@ class ContentExtractor(object):
         else:
             doc = doc_or_html
         return self._get_urls(doc, titles)
-
-    def get_category_urls(self, source_url, doc):
-        """Inputs source lxml root and source url, extracts domain and
-        finds all of the top level urls, we are assuming that these are
-        the category urls.
-        cnn.com --> [cnn.com/latest, world.cnn.com, cnn.com/asia]
-        """
-        page_urls = self.get_urls(doc)
-        valid_categories = []
-        for p_url in page_urls:
-            scheme = urls.get_scheme(p_url, allow_fragments=False)
-            domain = urls.get_domain(p_url, allow_fragments=False)
-            path = urls.get_path(p_url, allow_fragments=False)
-
-            if not domain and not path:
-                if self.config.verbose:
-                    print('elim category url %s for no domain and path'
-                          % p_url)
-                continue
-            if path and path.startswith('#'):
-                if self.config.verbose:
-                    print('elim category url %s path starts with #' % p_url)
-                continue
-            if scheme and (scheme != 'http' and scheme != 'https'):
-                if self.config.verbose:
-                    print(('elim category url %s for bad scheme, '
-                           'not http nor https' % p_url))
-                continue
-
-            if domain:
-                child_tld = tldextract.extract(p_url)
-                domain_tld = tldextract.extract(source_url)
-                child_subdomain_parts = child_tld.subdomain.split('.')
-                subdomain_contains = False
-                for part in child_subdomain_parts:
-                    if part == domain_tld.domain:
-                        if self.config.verbose:
-                            print(('subdomain contains at %s and %s' %
-                                   (str(part), str(domain_tld.domain))))
-                        subdomain_contains = True
-                        break
-
-                # Ex. microsoft.com is definitely not related to
-                # espn.com, but espn.go.com is probably related to espn.com
-                if not subdomain_contains and \
-                        (child_tld.domain != domain_tld.domain):
-                    if self.config.verbose:
-                        print(('elim category url %s for domain '
-                               'mismatch' % p_url))
-                        continue
-                elif child_tld.subdomain in ['m', 'i']:
-                    if self.config.verbose:
-                        print(('elim category url %s for mobile '
-                               'subdomain' % p_url))
-                    continue
-                else:
-                    valid_categories.append(scheme + '://' + domain)
-                    # TODO account for case where category is in form
-                    # http://subdomain.domain.tld/category/ <-- still legal!
-            else:
-                # we want a path with just one subdir
-                # cnn.com/world and cnn.com/world/ are both valid_categories
-                path_chunks = [x for x in path.split('/') if len(x) > 0]
-                if 'index.html' in path_chunks:
-                    path_chunks.remove('index.html')
-
-                if len(path_chunks) == 1 and len(path_chunks[0]) < 14:
-                    valid_categories.append(domain + path)
-                else:
-                    if self.config.verbose:
-                        print(('elim category url %s for >1 path chunks '
-                               'or size path chunks' % p_url))
-        stopwords = [
-            'about', 'help', 'privacy', 'legal', 'feedback', 'sitemap',
-            'profile', 'account', 'mobile', 'sitemap', 'facebook', 'myspace',
-            'twitter', 'linkedin', 'bebo', 'friendster', 'stumbleupon',
-            'youtube', 'vimeo', 'store', 'mail', 'preferences', 'maps',
-            'password', 'imgur', 'flickr', 'search', 'subscription', 'itunes',
-            'siteindex', 'events', 'stop', 'jobs', 'careers', 'newsletter',
-            'subscribe', 'academy', 'shopping', 'purchase', 'site-map',
-            'shop', 'donate', 'newsletter', 'product', 'advert', 'info',
-            'tickets', 'coupons', 'forum', 'board', 'archive', 'browse',
-            'howto', 'how to', 'faq', 'terms', 'charts', 'services',
-            'contact', 'plus', 'admin', 'login', 'signup', 'register',
-            'developer', 'proxy']
-
-        _valid_categories = []
-
-        # TODO Stop spamming urlparse and tldextract calls...
-
-        for p_url in valid_categories:
-            path = urls.get_path(p_url)
-            subdomain = tldextract.extract(p_url).subdomain
-            conjunction = path + ' ' + subdomain
-            bad = False
-            for badword in stopwords:
-                if badword.lower() in conjunction.lower():
-                    if self.config.verbose:
-                        print(('elim category url %s for subdomain '
-                               'contain stopword!' % p_url))
-                    bad = True
-                    break
-            if not bad:
-                _valid_categories.append(p_url)
-
-        _valid_categories.append('/')  # add the root
-
-        for i, p_url in enumerate(_valid_categories):
-            if p_url.startswith('://'):
-                p_url = 'http' + p_url
-                _valid_categories[i] = p_url
-
-            elif p_url.startswith('//'):
-                p_url = 'http:' + p_url
-                _valid_categories[i] = p_url
-
-            if p_url.endswith('/'):
-                p_url = p_url[:-1]
-                _valid_categories[i] = p_url
-
-        _valid_categories = list(set(_valid_categories))
-
-        category_urls = [urls.prepare_url(p_url, source_url)
-                         for p_url in _valid_categories]
-        category_urls = [c for c in category_urls if c is not None]
-        return category_urls
 
     def extract_tags(self, doc):
         if len(list(doc)) == 0:

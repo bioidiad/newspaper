@@ -15,12 +15,14 @@ build
 _build
 eggs
 parts
-bin
+venv/bin
 var
+bin
+lib
 sdist
 develop-eggs
 .installed.cfg
-lib
+venv/lib
 lib64
 __pycache__
 
@@ -40,3 +42,4 @@ nosetests.xml
 .project
 .pydevproject
 venv
+pyvenv.cfg

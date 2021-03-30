@@ -20,8 +20,6 @@ log = logging.getLogger(__name__)
 
 PARENT_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 
-POPULAR_URLS = os.path.join(
-    PARENT_DIRECTORY, 'resources/misc/popular_sources.txt')
 USERAGENTS = os.path.join(PARENT_DIRECTORY, 'resources/misc/useragents.txt')
 
 STOPWORDS_DIR = os.path.join(PARENT_DIRECTORY, 'resources/text')
